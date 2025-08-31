@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAGIC ARTICLE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white shadow-xl rounded-2xl p-8 max-w-4xl w-full mx-auto">
+        <h1 class="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-2">MAGIC ARTICLE</h1>
+        <p class="text-center text-gray-500 mb-8">Ubah artikel pendek menjadi lebih panjang dan komprehensif dengan bantuan AI.</p>
+
+        <div class="space-y-6 mb-8">
+            <div>
+                <label for="input-article" class="block text-gray-700 font-medium mb-2">Tempel artikel Anda di sini:</label>
+                <textarea id="input-article" class="w-full h-48 p-4 rounded-xl border-2 border-gray-300 focus:border-blue-500 focus:ring-blue-500 transition-colors duration-200 resize-none text-gray-800" placeholder="Contoh: Manfaat teh hijau adalah ..."></textarea>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-center gap-4 mb-8">
+            <button id="process-button" class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:bg-blue-700 transition-colors duration-200">
+                <span id="button-text">Perpanjang Artikel</span>
+            </button>
+            <button id="copy-button" class="bg-green-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:bg-green-700 transition-colors duration-200 hidden">
+                Salin ke Clipboard
+            </button>
+            <button id="delete-button" class="bg-red-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:bg-red-700 transition-colors duration-200 hidden">
+                Hapus Artikel
+            </button>
+        </div>
+        
+        <div id="output-section" class="hidden">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Artikel yang Disempurnakan:</h2>
+            <div id="loading-indicator" class="text-center text-gray-500 hidden mb-4">
+                <svg class="animate-spin h-8 w-8 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <p class="mt-2">Memproses...</p>
+            </div>
+            <div id="error-message" class="bg-red-100 text-red-700 p-4 rounded-xl hidden mb-4"></div>
+            <div id="output-article" class="bg-gray-50 p-6 rounded-xl border-2 border-gray-200 whitespace-pre-wrap text-gray-800 text-sm leading-relaxed"></div>
+        </div>
+    </div>
+
+    <div id="message-box" class="fixed inset-x-0 top-4 z-50 flex items-center justify-center pointer-events-none">
+        <div class="bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg opacity-0 transform translate-y-full transition-all duration-500 ease-in-out">
+            Artikel berhasil disalin!
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const processButton = document.getElementById('process-button');
+            const copyButton = document.getElementById('copy-button');
+            const deleteButton = document.getElementById('delete-button');
+            const inputArticle = document.getElementById('input-article');
+            const outputArticle = document.getElementById('output-article');
+            const outputSection = document.getElementById('output-section');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const errorMessage = document.getElementById('error-message');
+            const messageBox = document.getElementById('message-box').firstElementChild;
+            const buttonText = document.getElementById('button-text');
+
+            const TEXT_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
+            const API_KEY = "";
+
+            // Handle API call with exponential backoff
+            async function callApiWithBackoff(url, payload, retries = 3, delay = 1000) {
+                try {
+                    const response = await fetch(url + API_KEY, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429 && retries > 0) {
+                        console.log(`Too many requests. Retrying in ${delay / 1000}s...`);
+                        await new Promise(res => setTimeout(res, delay));
+                        return callApiWithBackoff(url, payload, retries - 1, delay * 2);
+                    }
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(`API error: ${error.error.message}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    throw error;
+                }
+            }
+            
+            processButton.addEventListener('click', async () => {
+                const articleContent = inputArticle.value.trim();
+                if (!articleContent) {
+                    showError('Silakan masukkan artikel yang ingin Anda perpanjang.');
+                    return;
+                }
+
+                outputSection.classList.remove('hidden');
+                loadingIndicator.classList.remove('hidden');
+                errorMessage.classList.add('hidden');
+                outputArticle.textContent = '';
+                copyButton.classList.add('hidden');
+                deleteButton.classList.add('hidden');
+                buttonText.textContent = 'Memproses...';
+                processButton.disabled = true;
+
+                const userPrompt = `Perpanjang artikel berikut menjadi minimal 500 kata. Tambahkan detail, contoh, dan struktur yang lebih baik. Pastikan tata bahasa dan ejaan akurat.\n\nArtikel: "${articleContent}"`;
+                
+                const payload = {
+                    contents: [{
+                        parts: [{ text: userPrompt }]
+                    }]
+                };
+
+                try {
+                    const result = await callApiWithBackoff(TEXT_API_URL, payload);
+                    const generatedText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (generatedText) {
+                        outputArticle.textContent = generatedText;
+                        copyButton.classList.remove('hidden');
+                        deleteButton.classList.remove('hidden');
+                    } else {
+                        throw new Error('Tidak ada teks yang dihasilkan.');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    showError(`Gagal memperpanjang artikel. Silakan coba lagi. Detail: ${error.message}`);
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                    buttonText.textContent = 'Perpanjang Artikel';
+                    processButton.disabled = false;
+                }
+            });
+
+            copyButton.addEventListener('click', () => {
+                const textToCopy = outputArticle.textContent;
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    showMessage('Artikel berhasil disalin!');
+                }).catch(err => {
+                    console.error('Gagal menyalin teks:', err);
+                    showError('Gagal menyalin teks ke clipboard.');
+                });
+            });
+
+            deleteButton.addEventListener('click', () => {
+                inputArticle.value = '';
+                outputArticle.textContent = '';
+                outputSection.classList.add('hidden');
+                copyButton.classList.add('hidden');
+                deleteButton.classList.add('hidden');
+            });
+            
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+                outputSection.classList.remove('hidden');
+                loadingIndicator.classList.add('hidden');
+            }
+
+            function showMessage(message) {
+                messageBox.textContent = message;
+                messageBox.classList.remove('opacity-0', 'translate-y-full');
+                messageBox.classList.add('opacity-100', 'translate-y-0');
+                setTimeout(() => {
+                    messageBox.classList.remove('opacity-100', 'translate-y-0');
+                    messageBox.classList.add('opacity-0', 'translate-y-full');
+                }, 2000);
+            }
+        });
+    </script>
+</body>
+</html>
